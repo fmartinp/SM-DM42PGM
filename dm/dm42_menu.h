@@ -108,8 +108,10 @@ extern const smenu_t   MID_STACK_AREA; // Stack area config
 #define MI_PRTOF_GR_IN_TXT 64
 #define MI_PRTOF_NOIR      65
 #define MI_PRINT_DBLNL     66
+#define MI_PRINT_VIEW      67
+#define MI_PRINT_DEL       68
 
-#define MI_DYNSTACKEXT     67
+#define MI_DYNSTACKEXT     69
 
 // --------------------------------
 

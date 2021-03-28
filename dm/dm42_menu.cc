@@ -208,8 +208,30 @@ void start_help() {
 }
 
 
+int text_viewer(const char * fpath, const char * fname, void * data) {
+  FRESULT res;
+  res = f_open(ppgm_fp, fpath, FA_READ);
+//  run_help_file("/HELP/20210327-16462505.htm");
+  
+  f_close(ppgm_fp);
+  return 0;
+}
 
 
+int delete_file(const char * fpath, const char * fname, void * data) {
+  FRESULT res;
+  sys_disk_write_enable(1);
+  res = f_unlink(fpath);
+  sys_disk_write_enable(0);
+  if ( res != FR_OK ) {
+    // Print fail
+    lcd_puts(t24,"Fail to delete."); lcd_refresh();
+    lcd_refresh();
+    wait_for_key_press();
+  } 
+
+  return 0;
+}
 
 
 int pgm_import_enter(const char * fpath, const char * fname, void * data) {
@@ -716,6 +738,8 @@ const uint8_t mid_print[] = {
     MI_PRTOF_GR_IN_TXT,
     MI_PRTOF_NOIR,
     MI_PRINT_DBLNL,
+    MI_PRINT_VIEW,
+    MI_PRINT_DEL,
     0 }; // Terminator
 
 
@@ -884,6 +908,15 @@ int run_menu_item(uint8_t line_id) {
   case MI_PRINT_DBLNL:
     set_print_to_file(PRINT_DBLNL, !is_print_to_file(PRINT_DBLNL), 1);
     break;
+  case MI_PRINT_VIEW:
+    ret = file_selection_screen("View Text Print", PRINT_DIR, PRINT_TXT_EXT, text_viewer, 0, 0, NULL);
+    if (ret == MRET_EXIT) ret = 0;
+    break;
+  case MI_PRINT_DEL:
+    ret = file_selection_screen("Delete Print File", PRINT_DIR, PRINT_TXT_EXT, delete_file, 0, 0, NULL);
+    if (ret == MRET_EXIT) ret = 0;
+    break;
+
 
   /* Stack */
   case MI_STACK_CONFIG:
@@ -1069,6 +1102,8 @@ const char * menu_line_str(uint8_t line_id, char * s, const int slen) {
   case MI_PRTOF_NOIR:      ln = opt_str(s, " Don't print to IR", is_print_to_file(PRTOF_NOIR));      break;
   case MI_PRTOF_GR_IN_TXT: ln = opt_str(s, " Graphics in Text",  is_print_to_file(PRTOF_GR_IN_TXT)); break;
   case MI_PRINT_DBLNL:     ln = opt_str(s, " Double Newline",    is_print_to_file(PRINT_DBLNL));     break;
+  case MI_PRINT_VIEW:      ln = "View Text Print >";  break;
+  case MI_PRINT_DEL:       ln = "Delete Print >";     break;
 
   default:
     ln = NULL;
