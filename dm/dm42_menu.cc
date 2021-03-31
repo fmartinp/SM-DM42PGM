@@ -208,15 +208,424 @@ void start_help() {
 }
 
 
-int text_viewer(const char * fpath, const char * fname, void * data) {
+/* typedef struct {
+  char *buffer;
+  int offs;     // buffer position in file
+  int pos;      // ftell = buf_offs + pos
+  uint last;     // last byte count read (valid bytes in buf)
+} buf_t;
+
+
+#define FORWARD    false
+#define BACKWARD   true
+
+
+
+char buf_getc(buf_t *buf, bool direction) {
   FRESULT res;
-  res = f_open(ppgm_fp, fpath, FA_READ);
-//  run_help_file("/HELP/20210327-16462505.htm");
+  char c;
+  if (direction == FORWARD) {
+    if (buf->pos == (int)buf->last) {
+      c = EOF;
+    } else {
+      if (buf->pos == -1) {
+        buf->pos = 0;
+      }
+      c = buf->buffer[buf->pos];
+      buf->pos = buf->pos+1;
+      if (( (uint)buf->pos == buf->last) && (f_size(ppgm_fp) > (uint) buf->offs+ buf->last)) {
+        res = f_lseek(ppgm_fp,buf->offs+AUX_BUF_SIZE);
+        if (res == FR_OK) {
+          buf->offs = f_tell(ppgm_fp);
+          buf->pos = 0;
+          res = f_read(ppgm_fp,buf->buffer,AUX_BUF_SIZE,&(buf->last));
+        }
+      }
+    }
+  } else {
+    if (buf->pos == -1) {
+      c = EOF;
+    } else {
+      if ((uint) buf->pos == buf->last) {
+        buf->pos = buf->last -1;
+      }
+      c = buf->buffer[buf->pos];
+      buf->pos = buf->pos-1;
+      if ((buf->pos == -1) && (buf->offs > 0)) {
+        res = f_lseek(ppgm_fp,buf->offs-AUX_BUF_SIZE);
+        if (res == FR_OK) {
+          buf->offs = f_tell(ppgm_fp);
+          buf->pos = 0;
+          res = f_read(ppgm_fp,buf->buffer,AUX_BUF_SIZE,&(buf->last));
+        }
+      }
+    }
+  }
+  return c;
+}
+
+FRESULT buf_setbuf(buf_t *buf, int offs, int pos) {
+  FRESULT res = FR_OK;
+  if (buf->offs != offs) {
+    buf->offs = offs;
+    res = f_lseek(ppgm_fp,buf->offs);
+    res = f_read(ppgm_fp,buf->buffer,AUX_BUF_SIZE,&(buf->last));
+  }
+  buf->pos=pos;
+  return res;
+}
+
+
+char *buf_getline(char *str, buf_t *buf) {
+  int k=0;
+  char *res = str;
+
+  do {
+    str[k++] = buf_getc(buf,FORWARD);
+  } while (str[k]!='\n' || str[k]!=EOF || k<MAX_LN_LEN);
   
-  f_close(ppgm_fp);
+  if (str[0] == EOF) {
+    res = NULL;
+  } 
+  
+  while (k<MAX_LN_LEN) {
+    str[k++]= ' ';
+  }
+  return res;
+}
+
+int buf_setline(buf_t *buf, bool direction) {
+  char c;
+  int res = 0;
+  int k = 0;
+  int refln_pos  = buf->pos;
+  int refln_offs = buf->offs;
+
+  do {
+    k++;
+    c = buf_getc(buf,direction);
+  } while (c!='\n' || buf->pos!=-1 || buf->pos!=(int)buf->last || k<MAX_LN_LEN);
+
+  if (direction == FORWARD) {
+    if ((uint)buf->pos==buf->last) {
+      buf_setbuf(buf,refln_offs,refln_pos);
+      res = -1;
+    }
+  } else {
+    if ((refln_offs == 0) && (refln_pos == 0))
+       res = -1;
+    if (buf->pos ==-1) {
+      buf_setbuf(buf, 0, 0);
+    } else {
+      c = buf_getc(buf,FORWARD);
+      c = buf_getc(buf,FORWARD);
+    }
+  }
+  return res;
+} */
+
+#define MAX_LN_LEN 25
+
+bool readline(char *line) {
+  char c = '\0';
+  unsigned int rd;
+  int k = 0;
+  bool rtn = true;
+  //FRESULT res;
+  if (f_eof(ppgm_fp)) {
+    line[0] = '\0';
+    rtn = false;
+  } else {
+    while (!f_eof(ppgm_fp) && c != '\n' && k<MAX_LN_LEN) {
+      f_read(ppgm_fp,&c,1,&rd);
+      line[k++] = c;
+    }
+    line[--k] = '\0';
+  }
+  return rtn;
+}
+
+bool rewindline() {
+  char c ='\0';
+  unsigned int rd;
+  //FRESULT res;
+  bool rtn = true;
+  if (f_tell(ppgm_fp) == 0) {
+    rtn = false;
+  }
+  if (f_tell(ppgm_fp)<2) {
+    f_lseek(ppgm_fp,0);
+  } else {
+    while ( c != '\n') {
+      f_lseek(ppgm_fp,f_tell(ppgm_fp)-2);
+      if (f_tell(ppgm_fp)==0) break;
+      f_read(ppgm_fp,&c,1,&rd);
+    }
+  }
+  return rtn;
+}
+
+
+int text_viewer(const char * fpath, const char * fname, void * data) {
+  int upd = 1; // Repaint at first pass
+  int k1;
+  FRESULT res;
+  char *ln = aux_buf_ptr();
+  FSIZE_t topline_ptr;
+  bool bottom_screen = false;
+  char hpf[MAX_LN_LEN];
+
+  res = f_open(ppgm_fp, fpath, FA_READ);
+
+  if ( res != FR_OK ) {
+    // Print fail
+    lcd_puts(t24,"Fail to open."); lcd_refresh();
+    lcd_refresh();
+    wait_for_key_press();
+  } else {
+    topline_ptr = f_tell(ppgm_fp);
+    // Display title
+    lcd_clear_buf();
+    lcd_writeClr(t24);
+    //lcd_printR(t24,"Print Viewer: %s    %i", s, t);
+    lcd_putsR(t24, fname);
+    t24->ln_offs = 40;
+    #define top_y_lines 40
+    int y_lines = LCD_Y - top_y_lines;
+    lcd_fillLines(top_y_lines, LCD_EMPTY_VALUE, y_lines);
+    int font_lines = y_lines/lcd_lineHeight(t24);
+        //int const linelen = (LCD_X + fReg->xoffs)/lcd_fontWidth(fReg); //(LCD_X - fReg->xoffs)/fReg->f->width;
+        // From the top
+        //fReg->ln_offs = top_y_lines;
+        // == Clear main area ==
+    for (;;) {
+      k1 = runner_get_key(NULL);
+      if ( IS_EXIT_KEY(k1) ) break;
+      if ( is_menu_auto_off() ) break;
+      switch (k1) {
+      case KEY_UP:
+        if (rewindline()) {
+          upd =1;
+          topline_ptr = f_tell(ppgm_fp);
+          bottom_screen = false;
+        }
+        // upd = 1;
+        // bottom_screen = rewindline();
+        
+        // if (buf.offs + buf.pos > 0) {
+        //   ln[0] = buf_getc(&buf,BACKWARD);
+        //   //buf_setline(&buf,BACKWARD);
+        //   upd=1;
+        //   lcd_putsAt(fReg, 2, ln);
+        //   lcd_refresh();
+        // }
+        break;
+      case KEY_DOWN:
+        if (!bottom_screen) {
+          if (readline(ln)) {
+            upd = 1;
+            topline_ptr = f_tell(ppgm_fp);
+          }
+        }
+
+          // res = f_read(ppgm_fp,&c,1,&rd);
+          // cd[0] =c;
+          // cd[1] ='\0';
+          // if (c =='\n') cd[0] = 'h';
+          //upd = 1;
+          //bottom_screen = readline(ln);
+          //topline_ptr = f_tell(ppgm_fp);
+          // if (!bottom_screen) {
+          //   while (!f_eof(ppgm_fp) || (c=='\n')) {
+          //     res = f_read(ppgm_fp,&c,1,&rd);
+          //   }
+          //   if f_eof(ppgm_fp) {
+          //     res = f_lseek(ppgm_fp, topline_ptr);
+          //   } else {
+          //     topline_ptr = f_tell(ppgm_fp);
+          //   }
+          // }
+        break;
+      }
+
+        // Display
+      if (upd == 1) {
+        upd = 0;
+        for (int line=0; line<font_lines; line++) {
+          readline(ln);
+          hp2font(hpf, ln, strlen(ln));
+          lcd_putsAt(t24, line, hpf);
+        }
+        //   ) {
+        //     lcd_putsAt(fReg, line, ln);
+        //   } else {
+        //     lcd_putsAt(fReg, line, "\0");
+        //     bottom_screen = true;
+        //   }
+        // }
+          //bottom_screen = readline(ln);
+          //lcd_putsAt(fReg, line, ln);
+        if (f_eof(ppgm_fp)) bottom_screen = true;
+        //lcd_printR(t24,"%s %s", s, t);
+        lcd_refresh();
+        res = f_lseek(ppgm_fp, topline_ptr);
+      }
+    }
+  }
+  res =f_close(ppgm_fp);
   return 0;
 }
 
+/* int text_viewer(const char * fpath, const char * fname, void * data) {
+  int upd = 1; // Repaint at first pass
+  int k1;
+  FRESULT res;
+  buf_t buf;
+  char ln[MAX_LN_LEN];
+  int refln_pos  = 0;
+  int refln_offs = 0;
+  int bottom_screen = 0;
+
+  res = f_open(ppgm_fp, fpath, FA_READ);
+  if ( res != FR_OK ) {
+    // Print fail
+    lcd_puts(t24,"Fail to open."); lcd_refresh();
+    lcd_refresh();
+    wait_for_key_press();
+  } else {
+    buf.pos=0;
+    buf.offs=0;
+    buf.buffer= (char*) aux_buf_ptr();
+    res = f_read(ppgm_fp,buf.buffer,AUX_BUF_SIZE,&(buf.last));
+
+
+    // Display title
+    lcd_writeClr(t24);
+    lcd_clear_buf();
+    lcd_putsR(t24, fname);
+    t24->ln_offs = 8;
+    #define top_y_lines 40
+    int y_lines = LCD_Y - top_y_lines;
+    lcd_fillLines(top_y_lines, LCD_EMPTY_VALUE, y_lines);
+        //int font_lines = y_lines/lcd_lineHeight(fReg);
+        //int const linelen = (LCD_X + fReg->xoffs)/lcd_fontWidth(fReg); //(LCD_X - fReg->xoffs)/fReg->f->width;
+        // From the top
+        //fReg->ln_offs = top_y_lines;
+        // == Clear main area ==
+    for (;;) {
+      k1 = runner_get_key(NULL);
+      if ( IS_EXIT_KEY(k1) ) break;
+      if ( is_menu_auto_off() ) break;
+      switch (k1) {
+      case KEY_UP:
+        if (buf.offs + buf.pos > 0) {
+          ln[0] = buf_getc(&buf,BACKWARD);
+          //buf_setline(&buf,BACKWARD);
+          upd=1;
+          lcd_putsAt(fReg, 2, ln);
+          lcd_refresh();
+        }
+        break;
+      case KEY_DOWN:
+        //if (buf_setline(&buf,FORWARD) != EOF) {
+          upd =1;
+                    ln[0] = buf_getc(&buf,FORWARD);
+          lcd_putsAt(fReg, 2, ln);
+          lcd_refresh();
+        //}
+        break;
+      }
+
+      // Display
+      if (upd == 1) {
+        // upd = 0;
+        // char sampletext[5] = "hola" ;
+        // lcd_putsAt(fReg, 2, sampletext);
+        // lcd_refresh();
+      }
+    }
+  }
+  return 0;
+} */
+
+/* int text_viewer(const char * fpath, const char * fname, void * data) {
+  FRESULT res;
+  buf_t buf;
+  char ln[MAX_LN_LEN];
+  int refln_pos  = 0;
+  int refln_offs = 0;
+  int last_screen = 0;
+  int upd = 1; // Repaint at first pass
+  int k1;
+  res = f_open(ppgm_fp, fpath, FA_READ);
+  if ( res != FR_OK ) {
+    // Print fail
+    lcd_puts(t24,"Fail to open."); lcd_refresh();
+    lcd_refresh();
+    wait_for_key_press();
+  } else {
+    buf.pos=0;
+    buf.offs=0;
+    buf.buffer=aux_buf_ptr();
+    res = f_read(ppgm_fp,(&buf)->buffer,AUX_BUF_SIZE,&(buf.last));
+
+    if ( res != FR_OK ) {
+      lcd_puts(t24,"Fail to read."); lcd_refresh();
+      lcd_refresh();
+      wait_for_key_press();
+    } else {
+      // Display title
+      lcd_writeClr(t24);
+      lcd_clear_buf();
+      lcd_putsR(t24, fname);
+      t24->ln_offs = 8;
+      #define top_y_lines 40
+      int y_lines = LCD_Y - top_y_lines;
+      int font_lines = y_lines/lcd_lineHeight(fReg);
+      //int const linelen = (LCD_X + fReg->xoffs)/lcd_fontWidth(fReg); //(LCD_X - fReg->xoffs)/fReg->f->width;
+      // From the top
+      fReg->ln_offs = top_y_lines;
+      // == Clear main area ==
+      lcd_fillLines(top_y_lines, LCD_EMPTY_VALUE, y_lines);
+      for (;;) {
+        k1 = runner_get_key(NULL);
+        if ( IS_EXIT_KEY(k1) ) break;
+        if ( is_menu_auto_off() ) break;
+        switch (k1) {
+          case KEY_UP:
+            last_screen = 0;
+            if (buf_setline(&buf, BACKWARD)!=EOF) {
+              upd=1;
+            }
+            break;
+          case KEY_DOWN:
+            if ((last_screen !=1) && (buf_setline(&buf, FORWARD)!=EOF)) {
+              upd=1;
+            }
+            break;
+        }
+
+        // Display
+        if (upd == 1) {
+          upd = 0;
+          refln_pos = buf.pos;
+          refln_offs = buf.offs;
+          for (int line=0; line<font_lines; line++) {
+            if (buf_getline(ln, &buf)!=NULL) {
+              lcd_putsAt(fReg, line, ln);
+            } else {
+              last_screen = 1;
+          }
+        }
+        res = buf_setbuf(&buf,refln_offs,refln_pos);
+        }
+      }
+      res = f_close(ppgm_fp);
+    }
+  }
+
+  return 0;
+} */
 
 int delete_file(const char * fpath, const char * fname, void * data) {
   FRESULT res;
