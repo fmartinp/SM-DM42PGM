@@ -324,7 +324,7 @@ int buf_setline(buf_t *buf, bool direction) {
   return res;
 } */
 
-#define MAX_LN_LEN 25
+#define MAX_LN_LEN 40
 
 bool readline(char *line) {
   char c = '\0';
@@ -453,8 +453,7 @@ int text_viewer(const char * fpath, const char * fname, void * data) {
         upd = 0;
         for (int line=0; line<font_lines; line++) {
           readline(ln);
-          hp2font(hpf, ln, strlen(ln));
-          lcd_putsAt(t24, line, hpf);
+          lcd_putsAt(t24, line, ln);
         }
         //   ) {
         //     lcd_putsAt(fReg, line, ln);
